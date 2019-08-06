@@ -95,6 +95,7 @@ The raw API will not overwrite a running timer or existing timespan value.
 
 * `invalid_value`
     * If recording a negative timespan.
+* `invalid_state`
     * If starting a timer while a previous timer is running.
     * If stopping a timer while it is not running.
     * If trying to set a raw timespan while a timer is running.
