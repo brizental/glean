@@ -311,6 +311,14 @@ typedef struct {
  */
 typedef uint64_t TimerId;
 
+char *foo_bar(void);
+
+uint8_t foo_build(void);
+
+uint8_t foo_builder_initialize(void);
+
+void foo_set_bar(FfiStr value);
+
 void glean_boolean_set(uint64_t metric_id, uint8_t value);
 
 uint8_t glean_boolean_test_get_value(uint64_t metric_id, FfiStr storage_name);

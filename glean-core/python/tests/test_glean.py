@@ -43,6 +43,28 @@ GLEAN_APP_ID = "glean-python-test"
 
 ROOT = Path(__file__).parent
 
+def test_setting_foo_bar():
+    Glean._reset()
+
+    # Set bar before init, shouldn't error
+    Glean.set_bar("hey hey hey")
+
+    Glean._initialize_with_tempdir_for_testing(
+        application_id=GLEAN_APP_ID,
+        application_version=glean_version,
+        upload_enabled=True,
+        configuration=Glean._configuration,
+    )
+
+    # Check that value set before init worked
+    assert Glean.bar() == "hey hey hey"
+
+    # Set it again, now after init
+    Glean.set_bar("woop woop")
+
+    # Check that it worked just as well
+    assert Glean.bar() == "woop woop"
+
 
 def test_setting_upload_enabled_before_initialization_should_not_crash():
     Glean._reset()
@@ -805,3 +827,5 @@ def test_data_dir_is_required():
             upload_enabled=True,
             configuration=Glean._configuration,
         )
+
+

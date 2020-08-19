@@ -60,6 +60,10 @@ class Glean:
     ... )
     """
 
+    # Initialize the builder before anything else,
+    # it will hold any pre-init state
+    _ffi.lib.foo_builder_initialize()
+
     # Whether Glean was initialized
     _initialized: bool = False
     # Set when `initialize()` returns.
@@ -163,6 +167,9 @@ class Glean:
             # necessary on Python since it doesn't have the problem with static
             # initializers that Kotlin and Swift have.
 
+            # Build foo on initialize
+            _ffi.lib.foo_build()
+
             cfg = _ffi.make_config(
                 cls._data_dir, application_id, upload_enabled, configuration.max_events,
             )
@@ -252,6 +259,10 @@ class Glean:
         """
         # TODO: 1594184 Send the metrics ping
 
+        # Re-initialize the builder before anything else,
+        # it will hold any pre-init state
+        _ffi.lib.foo_builder_initialize()
+
         # WARNING: Do not run any tasks on the Dispatcher from here since this
         # is called atexit.
 
@@ -294,6 +305,14 @@ class Glean:
         Returns True if the Glean SDK has been initialized.
         """
         return cls._initialized
+
+    @classmethod
+    def set_bar(cls, value: str):
+        _ffi.lib.foo_set_bar(_ffi.ffi_encode_string(value))
+
+    @classmethod
+    def bar(cls):
+        return _ffi.ffi_decode_string(_ffi.lib.foo_bar())
 
     @classmethod
     def register_ping_type(cls, ping: "PingType") -> None:

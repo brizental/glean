@@ -50,6 +50,8 @@ use handlemap_ext::HandleMapExtension;
 use ping_type::PING_TYPES;
 use upload::FfiPingUploadTask;
 
+use glean_core::foo::{self, Builder as FooBuilder};
+
 /// Execute the callback with a reference to the Glean singleton, returning a `Result`.
 ///
 /// The callback returns a `Result<T, E>` while:
@@ -486,6 +488,93 @@ pub extern "C" fn glean_set_source_tags(raw_tags: RawStringArray, tags_count: i3
         let tags = from_raw_string_array(raw_tags, tags_count)?;
         Ok(glean.set_source_tags(tags))
     })
+}
+
+#[no_mangle]
+pub extern "C" fn foo_builder_initialize() -> u8 {
+    handlemap_ext::handle_result(|| {
+        foo::setup_foo_builder(Some(FooBuilder::new()))?;
+        log::info!("Foo builder initialized");
+        Ok(true)
+    })
+}
+
+
+#[no_mangle]
+pub extern "C" fn foo_build() -> u8 {
+    let mut error = ffi_support::ExternError::success();
+    let res =
+        ffi_support::abort_on_panic::call_with_result(
+            &mut error,
+            || {
+                if let Some(builder) = foo::global_foo_builder() {
+                    let lock = builder.lock().unwrap();
+                    if let Some(builder) = &*lock {
+                        foo::setup_foo(Some(builder.build()))?;
+                        log::info!("Foo initialized");
+                        return Ok(true);
+                    }
+                }
+                Err(glean_core::Error::not_initialized())
+
+            }
+        );
+    handlemap_ext::log_if_error(error);
+    res
+}
+
+
+#[no_mangle]
+pub extern "C" fn foo_bar() -> *mut c_char {
+    let mut error = ffi_support::ExternError::success();
+    let res =
+        ffi_support::abort_on_panic::call_with_result(
+            &mut error,
+            || {
+                if let Some(foo) = foo::global_foo() {
+                    let lock = foo.lock().unwrap();
+                    if let Some(foo) = &*lock {
+                        return Ok(String::from(foo.bar()));
+                    }
+                }
+                Err(glean_core::Error::not_initialized())
+
+            },
+        );
+    handlemap_ext::log_if_error(error);
+    log::info!("{:?}", &res);
+    res
+}
+
+#[no_mangle]
+pub extern "C" fn foo_set_bar(value: FfiStr) {
+    let mut error = ffi_support::ExternError::success();
+    let res = ffi_support::abort_on_panic::call_with_result(
+        &mut error,
+        || {
+            let value = value.to_string_fallible()?;
+
+            if let Some(foo) = foo::global_foo() {
+                let mut lock = foo.lock().unwrap();
+                if let Some(foo) = &mut *lock {
+                    foo.set_bar(value);
+                    return Ok(());
+                }
+            }
+
+            if let Some(builder) = foo::global_foo_builder() {
+                let mut lock = builder.lock().unwrap();
+                if let Some(builder) = &mut *lock {
+                    builder.bar(value);
+                    return Ok(());
+                }
+            }
+
+            // Ideally this would be a `builder_not_initialized` error.
+            Err(glean_core::Error::not_initialized())
+        });
+    handlemap_ext::log_if_error(error);
+    res
 }
 
 define_string_destructor!(glean_str_free);

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 
 //! Glean is a modern approach for recording and sending Telemetry data.
 //!
@@ -40,6 +40,7 @@ pub mod storage;
 mod system;
 pub mod upload;
 mod util;
+pub mod foo;
 
 pub use crate::common_metric_data::{CommonMetricData, Lifetime};
 use crate::database::Database;
