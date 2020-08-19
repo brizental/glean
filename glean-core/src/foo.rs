@@ -73,7 +73,7 @@ impl Builder {
 
     pub fn build(&self) -> Foo {
         Foo {
-            bar: self.bar.as_ref().unwrap_or(&String::from("WHATUP")).to_owned()
+            bar: self.bar.as_ref().unwrap_or(&String::from("Adding a default here for other tests to pass.")).to_owned()
         }
     }
 }
