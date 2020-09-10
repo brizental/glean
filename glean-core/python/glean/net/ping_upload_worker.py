@@ -144,7 +144,7 @@ def _process(data_dir: Path, application_id: str, configuration) -> bool:
                 incoming_task, upload_result.to_ffi()
             )
         elif tag == UploadTaskTag.WAIT:
-            time.sleep(1)
+            time.sleep(incoming_task.wait._0)
         elif tag == UploadTaskTag.DONE:
             return True
 
