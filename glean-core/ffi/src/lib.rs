@@ -219,6 +219,63 @@ pub unsafe extern "C" fn glean_enable_logging_to_fd(fd: u64) {
     };
 }
 
+/// App context over FFI.
+///
+/// **CAUTION**: This must match _exactly_ the definition on the Kotlin side.
+/// If this side is changed, the Kotlin side need to be changed, too.
+#[repr(C)]
+pub struct FfiContext<'a> {
+    pub os_version: FfiStr<'a>,
+    pub device_manufacturer: FfiStr<'a>,
+    pub device_model: FfiStr<'a>,
+    pub architecture: FfiStr<'a>,
+    pub app_build: FfiStr<'a>,
+    pub app_display_version: FfiStr<'a>,
+    pub app_channel: FfiStr<'a>,
+    pub locale: FfiStr<'a>,
+    #[cfg(target_os="android")]
+    pub android_sdk_version: FfiStr<'a>,
+}
+
+/// Convert the FFI-compatible context object into the proper Rust context object.
+impl TryFrom<&FfiContext<'_>> for glean_core::Context {
+    type Error = glean_core::Error;
+
+    fn try_from(ctx: &FfiContext) -> Result<Self, Self::Error> {
+        fn string_to_option(s: String) -> Option<String> {
+            if s.len() == 0 {
+                None
+            } else {
+                Some(s)
+            }
+        }
+
+        let os_version = string_to_option(ctx.os_version.to_string_fallible()?);
+        let device_manufacturer = string_to_option(ctx.device_manufacturer.to_string_fallible()?);
+        let device_model = string_to_option(ctx.device_model.to_string_fallible()?);
+        let architecture = string_to_option(ctx.architecture.to_string_fallible()?);
+        let app_build = string_to_option(ctx.app_build.to_string_fallible()?);
+        let app_display_version = string_to_option(ctx.app_display_version.to_string_fallible()?);
+        let app_channel = string_to_option(ctx.app_channel.to_string_fallible()?);
+        let locale = string_to_option(ctx.locale.to_string_fallible()?);
+        #[cfg(target_os="android")]
+        let android_sdk_version = string_to_option(ctx.android_sdk_version.to_string_fallible()?);
+
+        Ok(Self {
+            os_version,
+            device_manufacturer,
+            device_model,
+            architecture,
+            app_build,
+            app_display_version,
+            app_channel,
+            locale,
+            #[cfg(target_os="android")]
+            android_sdk_version,
+        })
+    }
+}
+
 /// Configuration over FFI.
 ///
 /// **CAUTION**: This must match _exactly_ the definition on the Kotlin side.
@@ -231,6 +288,7 @@ pub struct FfiConfiguration<'a> {
     pub upload_enabled: u8,
     pub max_events: Option<&'a i32>,
     pub delay_ping_lifetime_io: u8,
+    pub context: FfiContext<'a>,
 }
 
 /// Convert the FFI-compatible configuration object into the proper Rust configuration object.
@@ -244,6 +302,7 @@ impl TryFrom<&FfiConfiguration<'_>> for glean_core::Configuration {
         let upload_enabled = cfg.upload_enabled != 0;
         let max_events = cfg.max_events.filter(|&&i| i >= 0).map(|m| *m as usize);
         let delay_ping_lifetime_io = cfg.delay_ping_lifetime_io != 0;
+        let context = glean_core::Context::try_from(&cfg.context)?;
 
         Ok(Self {
             upload_enabled,
@@ -252,6 +311,7 @@ impl TryFrom<&FfiConfiguration<'_>> for glean_core::Configuration {
             language_binding_name,
             max_events,
             delay_ping_lifetime_io,
+            context,
         })
     }
 }
@@ -280,6 +340,12 @@ pub unsafe extern "C" fn glean_initialize(cfg: *const FfiConfiguration) -> u8 {
 pub extern "C" fn glean_on_ready_to_submit_pings() -> u8 {
     with_glean_value(|glean| glean.on_ready_to_submit_pings())
 }
+
+#[no_mangle]
+pub extern "C" fn glean_initialize_application_specific_core_metrics() {
+    with_glean_value_mut(|glean| glean.initialize_application_specific_core_metrics());
+}
+
 
 #[no_mangle]
 pub extern "C" fn glean_is_upload_enabled() -> u8 {

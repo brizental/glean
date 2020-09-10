@@ -103,6 +103,8 @@ internal interface LibGleanFFI : Library {
 
     fun glean_on_ready_to_submit_pings(): Byte
 
+    fun glean_initialize_application_specific_core_metrics()
+
     fun glean_enable_logging()
 
     fun glean_set_upload_enabled(flag: Byte)

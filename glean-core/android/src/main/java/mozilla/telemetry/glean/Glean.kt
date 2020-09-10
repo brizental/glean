@@ -7,9 +7,6 @@ package mozilla.telemetry.glean
 import android.app.ActivityManager
 import android.util.Log
 import android.content.Context
-import android.content.pm.PackageInfo
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Process
 import androidx.annotation.MainThread
 import androidx.annotation.VisibleForTesting
@@ -20,13 +17,12 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import mozilla.telemetry.glean.config.Configuration
 import mozilla.telemetry.glean.config.FfiConfiguration
-import mozilla.telemetry.glean.utils.getLocaleTag
+import mozilla.telemetry.glean.config.FfiContext
 import java.io.File
 import mozilla.telemetry.glean.rust.LibGleanFFI
 import mozilla.telemetry.glean.rust.getAndConsumeRustString
 import mozilla.telemetry.glean.rust.toBoolean
 import mozilla.telemetry.glean.rust.toByte
-import mozilla.telemetry.glean.GleanMetrics.GleanInternalMetrics
 import mozilla.telemetry.glean.GleanMetrics.Pings
 import mozilla.telemetry.glean.net.BaseUploader
 import mozilla.telemetry.glean.private.PingTypeBase
@@ -162,7 +158,8 @@ open class GleanInternalAPI internal constructor () {
                 languageBindingName = LANGUAGE_BINDING_NAME,
                 uploadEnabled = uploadEnabled,
                 maxEvents = configuration.maxEvents,
-                delayPingLifetimeIO = false
+                delayPingLifetimeIO = false,
+                context = FfiContext.ByValue(applicationContext, configuration.channel)
             )
 
             initialized = LibGleanFFI.INSTANCE.glean_initialize(cfg).toBoolean()
@@ -219,7 +216,7 @@ open class GleanInternalAPI internal constructor () {
             // The next times we start, we would have them around already.
             val isFirstRun = LibGleanFFI.INSTANCE.glean_is_first_run().toBoolean()
             if (isFirstRun) {
-                initializeCoreMetrics(applicationContext)
+                LibGleanFFI.INSTANCE.glean_initialize_application_specific_core_metrics()
             }
 
             // Deal with any pending events so we can start recording new ones
@@ -250,7 +247,7 @@ open class GleanInternalAPI internal constructor () {
             // Any new value will be sent in newly generated pings after startup.
             if (!isFirstRun) {
                 LibGleanFFI.INSTANCE.glean_clear_application_lifetime_metrics()
-                initializeCoreMetrics(applicationContext)
+                LibGleanFFI.INSTANCE.glean_initialize_application_specific_core_metrics()
             }
 
             // Signal Dispatcher that init is complete
@@ -327,12 +324,6 @@ open class GleanInternalAPI internal constructor () {
                 // Cancel any pending workers here so that we don't accidentally upload
                 // data after the upload has been disabled.
                 PingUploadWorker.cancel(applicationContext)
-            }
-
-            if (!originalEnabled && enabled) {
-                // If uploading is being re-enabled, we have to restore the
-                // application-lifetime metrics.
-                initializeCoreMetrics((this@GleanInternalAPI).applicationContext)
             }
 
             if (originalEnabled && !enabled) {
@@ -491,53 +482,6 @@ open class GleanInternalAPI internal constructor () {
         }
 
         return RecordedExperimentData(branchId, extraMap)
-    }
-
-    /**
-     * Initialize the core metrics internally managed by Glean (e.g. client id).
-     */
-    private fun initializeCoreMetrics(applicationContext: Context) {
-        // Set a few more metrics that will be sent as part of every ping.
-        // Please note that the following metrics must be set synchronously, so
-        // that they are guaranteed to be available with the first ping that is
-        // generated. We use an internal only API to do that.
-        // https://developer.android.com/reference/android/os/Build.VERSION
-        GleanInternalMetrics.androidSdkVersion.setSync(Build.VERSION.SDK_INT.toString())
-        GleanInternalMetrics.osVersion.setSync(Build.VERSION.RELEASE)
-        // https://developer.android.com/reference/android/os/Build
-        GleanInternalMetrics.deviceManufacturer.setSync(Build.MANUFACTURER)
-        GleanInternalMetrics.deviceModel.setSync(Build.MODEL)
-        GleanInternalMetrics.architecture.setSync(Build.SUPPORTED_ABIS[0])
-        GleanInternalMetrics.locale.setSync(getLocaleTag())
-
-        configuration.channel?.let {
-            GleanInternalMetrics.appChannel.setSync(it)
-        }
-
-        val packageInfo: PackageInfo
-
-        try {
-            packageInfo = applicationContext.packageManager.getPackageInfo(
-                    applicationContext.packageName, 0
-            )
-        } catch (e: PackageManager.NameNotFoundException) {
-            Log.e(
-                LOG_TAG,
-                "Could not get own package info, unable to report build id and display version"
-            )
-
-            GleanInternalMetrics.appBuild.setSync("inaccessible")
-            GleanInternalMetrics.appDisplayVersion.setSync("inaccessible")
-
-            return
-        }
-
-        @Suppress("DEPRECATION")
-        GleanInternalMetrics.appBuild.setSync(packageInfo.versionCode.toString())
-
-        GleanInternalMetrics.appDisplayVersion.setSync(
-            packageInfo.versionName?.let { it } ?: "Unknown"
-        )
     }
 
     /**

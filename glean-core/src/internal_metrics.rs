@@ -9,40 +9,61 @@ pub struct CoreMetrics {
     pub client_id: UuidMetric,
     pub first_run_date: DatetimeMetric,
     pub os: StringMetric,
+    // Provided by the language bindings
+    pub os_version: StringMetric,
+    pub device_manufacturer: StringMetric,
+    pub device_model: StringMetric,
+    pub architecture: StringMetric,
+    pub app_build: StringMetric,
+    pub app_display_version: StringMetric,
+    pub app_channel: StringMetric,
+    pub locale: StringMetric,
+    #[cfg(target_os="android")]
+    pub android_sdk_version: StringMetric,
 }
+
+macro_rules! new_metric (
+    ( $name:expr, $type:ident, $category:expr, $send_in_pings:expr, $lifetime:ident ) => {
+        $type::new(CommonMetricData {
+            name: $name.into(),
+            category: "".into(),
+            send_in_pings: vec![$send_in_pings.into()],
+            lifetime: Lifetime::$lifetime,
+            disabled: false,
+            dynamic_label: None,
+        })
+    };
+    ( $name:expr, $type:ident, $category:expr, $send_in_pings:expr, $lifetime:ident, $extra:expr ) => {
+        $type::new(
+            CommonMetricData {
+                name: $name.into(),
+                category: "".into(),
+                send_in_pings: vec![$send_in_pings.into()],
+                lifetime: Lifetime::$lifetime,
+                disabled: false,
+                dynamic_label: None,
+            },
+            $extra
+        )
+    };
+);
 
 impl CoreMetrics {
     pub fn new() -> CoreMetrics {
         CoreMetrics {
-            client_id: UuidMetric::new(CommonMetricData {
-                name: "client_id".into(),
-                category: "".into(),
-                send_in_pings: vec!["glean_client_info".into()],
-                lifetime: Lifetime::User,
-                disabled: false,
-                dynamic_label: None,
-            }),
-
-            first_run_date: DatetimeMetric::new(
-                CommonMetricData {
-                    name: "first_run_date".into(),
-                    category: "".into(),
-                    send_in_pings: vec!["glean_client_info".into()],
-                    lifetime: Lifetime::User,
-                    disabled: false,
-                    dynamic_label: None,
-                },
-                TimeUnit::Day,
-            ),
-
-            os: StringMetric::new(CommonMetricData {
-                name: "os".into(),
-                category: "".into(),
-                send_in_pings: vec!["glean_client_info".into()],
-                lifetime: Lifetime::Application,
-                disabled: false,
-                dynamic_label: None,
-            }),
+            client_id: new_metric!("client_id", UuidMetric, "", "glean_client_info", User),
+            first_run_date: new_metric!("first_run_date", DatetimeMetric, "", "glean_client_info", User, TimeUnit::Day),
+            os: new_metric!("os", StringMetric, "", "glean_client_info", Application),
+            os_version: new_metric!("os_version", StringMetric, "", "glean_client_info", Application),
+            device_manufacturer: new_metric!("device_manufacturer", StringMetric, "", "glean_client_info", Application),
+            device_model: new_metric!("device_model", StringMetric, "", "glean_client_info", Application),
+            architecture: new_metric!("architecture", StringMetric, "", "glean_client_info", Application),
+            app_build: new_metric!("app_build", StringMetric, "", "glean_client_info", Application),
+            app_display_version: new_metric!("app_display_version", StringMetric, "", "glean_client_info", Application),
+            app_channel: new_metric!("app_channel", StringMetric, "", "glean_client_info", Application),
+            locale: new_metric!("locale", StringMetric, "", "glean_client_info", Application),
+            #[cfg(target_os="android")]
+            android_sdk_version: new_metric!("android_sdk_version", StringMetric, "", "glean_client_info", Application),
         }
     }
 }
