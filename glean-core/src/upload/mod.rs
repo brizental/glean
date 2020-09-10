@@ -115,7 +115,14 @@ pub enum PingUploadTask {
     Upload(PingRequest),
     /// A flag signaling that the pending pings directories are not done being processed,
     /// thus the requester should wait and come back later.
-    Wait,
+    ///
+    /// This variant holds the amount of seconds the caller should wait before
+    /// asking for a new upload task. This value starts as MIN_BACKOFF_DELAY and increases exponentially.
+    ///
+    /// Since we only allow for three PingUploadTask::Wait in a row,
+    /// there is no upper limit for the duration of this delay. As soon as we get a different
+    /// response than PingUploadTask::Wait, it gets reset.
+    Wait(u32),
     /// A flag signaling that requester doesn't need to request any more upload tasks at this moment.
     ///
     /// There are three possibilities for this scenario:
@@ -128,6 +135,32 @@ pub enum PingUploadTask {
     /// [1]: An "uploading window" starts when a requester gets a new `PingUploadTask::Upload(PingRequest)`
     ///      response and finishes when they finally get a `PingUploadTask::Done` or `PingUploadTask::Wait` response.
     Done,
+}
+
+impl PingUploadTask {
+    /// Whether the current instance is of type Upload
+    pub fn is_upload(&self) -> bool {
+        match self {
+            PingUploadTask::Upload(..) => true,
+            _ => false,
+        }
+    }
+
+    /// Whether the current instance is of type Wait
+    pub fn is_wait(&self) -> bool {
+        match self {
+            PingUploadTask::Wait(..) => true,
+            _ => false,
+        }
+    }
+
+    /// Whether the current instance is of type Done
+    pub fn is_done(&self) -> bool {
+        match self {
+            PingUploadTask::Done => true,
+            _ => false,
+        }
+    }
 }
 
 /// Manages the pending pings queue and directory.
@@ -156,6 +189,8 @@ pub struct PingUploadManager {
     language_binding_name: String,
     /// Metrics related to ping uploading.
     upload_metrics: UploadMetrics,
+    /// The current backoff delay.
+    backoff_delay: AtomicU32,
     /// Policies for ping storage, uploading and requests.
     policy: Policy,
 }
@@ -206,6 +241,8 @@ impl PingUploadManager {
                 .expect("Unable to wait for startup ping processing to finish.");
         }
 
+        let policy = Policy::default();
+
         Self {
             queue,
             directory_manager,
@@ -216,7 +253,8 @@ impl PingUploadManager {
             rate_limiter: None,
             language_binding_name: language_binding_name.into(),
             upload_metrics: UploadMetrics::new(),
-            policy: Policy::default(),
+            backoff_delay: AtomicU32::new(policy.min_backoff_delay().to_owned()),
+            policy,
         }
     }
 
@@ -232,6 +270,7 @@ impl PingUploadManager {
         upload_manager
             .policy
             .set_max_pending_pings_directory_size(None);
+        upload_manager.policy.set_min_backoff_delay(None);
 
         upload_manager
     }
@@ -246,6 +285,10 @@ impl PingUploadManager {
 
     fn wait_attempt_count(&self) -> u32 {
         self.wait_attempt_count.load(Ordering::SeqCst)
+    }
+
+    fn backoff_delay(&self) -> u32 {
+        self.backoff_delay.load(Ordering::SeqCst)
     }
 
     /// Attempts to build a ping request from a ping file payload.
@@ -454,7 +497,10 @@ impl PingUploadManager {
             if self.wait_attempt_count() > self.policy.max_wait_attempts() {
                 PingUploadTask::Done
             } else {
-                PingUploadTask::Wait
+                let current_delay = self.backoff_delay();
+                self.backoff_delay
+                    .store(current_delay * 2, Ordering::SeqCst);
+                PingUploadTask::Wait(current_delay)
             }
         };
 
@@ -529,13 +575,13 @@ impl PingUploadManager {
     pub fn get_upload_task(&self, glean: &Glean, log_ping: bool) -> PingUploadTask {
         let task = self.get_upload_task_internal(glean, log_ping);
 
-        if task != PingUploadTask::Wait && self.wait_attempt_count() > 0 {
+        if !task.is_wait() && self.wait_attempt_count() > 0 {
             self.wait_attempt_count.store(0, Ordering::SeqCst);
+            self.backoff_delay
+                .store(self.policy.min_backoff_delay(), Ordering::SeqCst);
         }
 
-        if (task == PingUploadTask::Wait || task == PingUploadTask::Done)
-            && self.recoverable_failure_count() > 0
-        {
+        if !task.is_upload() && self.recoverable_failure_count() > 0 {
             self.recoverable_failure_count.store(0, Ordering::SeqCst);
         }
 
@@ -790,10 +836,7 @@ mod test {
         upload_manager.enqueue_ping(&glean, &Uuid::new_v4().to_string(), PATH, "", None);
 
         // Verify that we are indeed told to wait because we are at capacity
-        assert_eq!(
-            PingUploadTask::Wait,
-            upload_manager.get_upload_task(&glean, false)
-        );
+        assert!(upload_manager.get_upload_task(&glean, false).is_wait());
 
         // Wait for the uploading window to reset
         thread::sleep(Duration::from_secs(secs_per_interval));
@@ -1021,7 +1064,7 @@ mod test {
         // Create a new upload manager so that we have access to its functions directly,
         // make it synchronous so we don't have to manually wait for the scanning to finish.
         let upload_manager = PingUploadManager::no_policy(dir.path(), /* sync_scan */ true);
-        while upload_manager.get_upload_task(&glean, false) == PingUploadTask::Wait {
+        while upload_manager.get_upload_task(&glean, false).is_wait() {
             thread::sleep(Duration::from_millis(10));
         }
 
@@ -1073,7 +1116,7 @@ mod test {
         let upload_manager = PingUploadManager::no_policy(dir.path(), /* sync_scan */ false);
 
         // Wait for processing of pending pings directory to finish.
-        while upload_manager.get_upload_task(&glean, false) == PingUploadTask::Wait {
+        while upload_manager.get_upload_task(&glean, false).is_wait() {
             thread::sleep(Duration::from_millis(10));
         }
 
@@ -1287,10 +1330,7 @@ mod test {
         // we should be throttled and thus get a PingUploadTask::Wait.
         // Check that we are indeed allowed to get this response as many times as expected.
         for _ in 0..max_wait_attempts {
-            assert_eq!(
-                upload_manager.get_upload_task(&glean, false),
-                PingUploadTask::Wait
-            );
+            assert!(upload_manager.get_upload_task(&glean, false).is_wait());
         }
 
         // Check that after we get PingUploadTask::Wait the allowed number of times,
@@ -1313,6 +1353,77 @@ mod test {
         assert_eq!(
             upload_manager.get_upload_task(&glean, false),
             PingUploadTask::Done
+        );
+    }
+
+    #[test]
+    fn backoff_policy_increases_and_resets_correctly() {
+        let (glean, dir) = new_glean(None);
+
+        // Create a new upload manager so that we have access to its functions directly,
+        // make it synchronous so we don't have to manually wait for the scanning to finish.
+        let mut upload_manager =
+            PingUploadManager::no_policy(dir.path(), /* sync_scan */ true);
+
+        // Define a min_backoff_delay policy, this is disabled for tests by default.
+        let min_backoff_delay = 10;
+        upload_manager
+            .backoff_delay
+            .store(min_backoff_delay, Ordering::SeqCst);
+        upload_manager
+            .policy
+            .set_min_backoff_delay(Some(min_backoff_delay));
+
+        // Define a max_wait_attemps policy, this is disabled for tests by default.
+        let max_wait_attempts = 3;
+        upload_manager
+            .policy
+            .set_max_wait_attempts(Some(max_wait_attempts));
+
+        // Add a rate limiter to the upload mangager with max of 1 ping 10secs.
+        //
+        // We arbitrarily set the maximum pings per interval to a very low number,
+        // when the rate limiter reaches it's limit get_upload_task returns a PingUploadTask::Wait,
+        // which will allow us to test that increasing / resetting of backoff time works as expected.
+        let secs_per_interval = 10;
+        let max_pings_per_interval = 1;
+        upload_manager.set_rate_limiter(secs_per_interval, max_pings_per_interval);
+
+        // Enqueue two pings
+        upload_manager.enqueue_ping(&glean, &Uuid::new_v4().to_string(), PATH, "", None);
+        upload_manager.enqueue_ping(&glean, &Uuid::new_v4().to_string(), PATH, "", None);
+
+        // Get the first ping, it should be returned normally.
+        match upload_manager.get_upload_task(&glean, false) {
+            PingUploadTask::Upload(_) => {}
+            _ => panic!("Expected upload manager to return the next request!"),
+        }
+
+        // Try to get the next ping three times (that is the max wait attempts we set up earlier)
+        // each time, check that the value increased exponentially by a power of two.
+        assert_eq!(
+            upload_manager.get_upload_task(&glean, false),
+            PingUploadTask::Wait(min_backoff_delay)
+        );
+        assert_eq!(
+            upload_manager.get_upload_task(&glean, false),
+            PingUploadTask::Wait(min_backoff_delay * 2)
+        );
+        assert_eq!(
+            upload_manager.get_upload_task(&glean, false),
+            PingUploadTask::Wait(min_backoff_delay * 2 * 2)
+        );
+
+        // Try to get the 4th time, we should get a Done response, since we reached max wait attempts.
+        assert_eq!(
+            upload_manager.get_upload_task(&glean, false),
+            PingUploadTask::Done
+        );
+
+        // Try again, we should get a PingUploadTask::Wait response with a reset value
+        assert_eq!(
+            upload_manager.get_upload_task(&glean, false),
+            PingUploadTask::Wait(min_backoff_delay)
         );
     }
 }

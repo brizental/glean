@@ -8,6 +8,7 @@ const MAX_RECOVERABLE_FAILURES: u32 = 3;
 const MAX_WAIT_ATTEMPTS: u32 = 3;
 const MAX_PING_BODY_SIZE: usize = 1024 * 1024; // 1 MB
 const MAX_PENDING_PINGS_DIRECTORY_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+const MIN_BACKOFF_DELAY: u32 = 10; // 10 seconds
 
 /// A struct holding the values for all the policies related to ping storage, uploading and requests.
 #[derive(Debug)]
@@ -25,6 +26,8 @@ pub struct Policy {
     max_ping_body_size: Option<usize>,
     /// The maximum size in byte the pending pings directory may have on disk.
     max_pending_pings_directory_size: Option<u64>,
+    /// The minimum backoff delay between failed ping uploads.
+    min_backoff_delay: Option<u32>,
 }
 
 impl Default for Policy {
@@ -34,6 +37,7 @@ impl Default for Policy {
             max_wait_attempts: Some(MAX_WAIT_ATTEMPTS),
             max_ping_body_size: Some(MAX_PING_BODY_SIZE),
             max_pending_pings_directory_size: Some(MAX_PENDING_PINGS_DIRECTORY_SIZE),
+            min_backoff_delay: Some(MIN_BACKOFF_DELAY),
         }
     }
 }
@@ -85,5 +89,17 @@ impl Policy {
     #[cfg(test)]
     pub fn set_max_pending_pings_directory_size(&mut self, v: Option<u64>) {
         self.max_pending_pings_directory_size = v;
+    }
+
+    pub fn min_backoff_delay(&self) -> u32 {
+        match &self.min_backoff_delay {
+            Some(v) => *v,
+            None => 0,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn set_min_backoff_delay(&mut self, v: Option<u32>) {
+        self.min_backoff_delay = v;
     }
 }

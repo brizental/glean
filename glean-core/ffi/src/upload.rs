@@ -104,7 +104,7 @@ pub enum FfiPingUploadTask {
         body: ByteBuffer,
         headers: *mut c_char,
     },
-    Wait,
+    Wait(u32),
     Done,
 }
 
@@ -126,7 +126,7 @@ impl From<PingUploadTask> for FfiPingUploadTask {
                     headers: headers.into_raw(),
                 }
             }
-            PingUploadTask::Wait => FfiPingUploadTask::Wait,
+            PingUploadTask::Wait(u32) => FfiPingUploadTask::Wait(u32),
             PingUploadTask::Done => FfiPingUploadTask::Done,
         }
     }
