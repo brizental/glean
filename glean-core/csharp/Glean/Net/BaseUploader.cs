@@ -88,8 +88,6 @@ namespace Mozilla.Glean.Net
             // TODO: must not work like this, it should work off the main thread.
             // FOR TESTING Implement the upload worker here and call this from Glean.cs
 
-            int waitAttempts = 0;
-
             // Limits are enforced by glean-core to avoid an inifinite loop here.
             // Whenever a limit is reached, this binding will receive `UploadTaskTag.Done` and step out.
             while (true)
@@ -126,7 +124,7 @@ namespace Mozilla.Glean.Net
                         }
                         break;
                     case UploadTaskTag.Wait:
-                        Thread.Sleep(100);
+                        Thread.Sleep(incomingTask.wait._0);
                         break;
                     case UploadTaskTag.Done:
                         // Nothing to do here, break out of the loop.

@@ -52,6 +52,13 @@ namespace Mozilla.Glean.FFI
         public IntPtr headers;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+
+    internal struct FfiUploadTaskWait {
+        public byte tag;
+        public Int32 _0;
+    }
+
     /// <summary>
     /// Represent an upload task by simulating the union passed through
     /// the FFI layer.
@@ -63,6 +70,8 @@ namespace Mozilla.Glean.FFI
         public byte tag;
         [FieldOffset(0), MarshalAs(UnmanagedType.Struct)]
         public FfiUploadTaskBody body;
+        [FieldOffset(0), MarshalAs(UnmanagedType.Struct)]
+        public FfiUploadTaskWait wait;
     }
 
     internal static class LibGleanFFI
