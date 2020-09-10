@@ -107,7 +107,8 @@ public class HttpPingUploader {
                 self.upload(path: request.path, data: request.body, headers: request.headers) { result in
                     glean_process_ping_upload_response(&incomingTask, result.toFfi())
                 }
-            case .wait:
+            case .wait(let seconds):
+                sleep(seconds)
                 continue
             case .done:
                 return
