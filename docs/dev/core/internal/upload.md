@@ -88,9 +88,37 @@ sequenceDiagram
     Glean core->>Glean wrapper: Task::Done
 ```
 
-Glean core will take care of file management, cleanup, rescheduling and rate limiting[^1].
+Glean core will take care of file management, cleanup, rescheduling and rate limiting.
 
-[^1]: Rate limiting is achieved by limiting the amount of times a language binding is allowed to get a `Task::Upload(PingRequest)` from `get_upload_task` in a given time interval. Currently, the default limit is for a maximum of 15 upload tasks every 60 seconds and there are no exposed methods that allow changing this default (follow [Bug 1647630](https://bugzilla.mozilla.org/show_bug.cgi?id=1647630) for updates). If the caller has reached the maximum tasks for the current interval, they will get a `Task::Wait` regardless if there are other `Task::Upload(PingRequest)`s queued.
+## Policies
+
+The uploading functionality works based on a series of policies to keep resource usage in check and avoid infinite upload failure loops.
+
+Currently there are no exposed ways for bindings to change this upload policies for testing purposes or otherwise (follow [Bug 1664217](https://bugzilla.mozilla.org/show_bug.cgi?id=1664217) for updates).
+
+### Rate limiting
+
+Rate limiting is achieved by limiting the amount of times a language binding is allowed to get a `Task::Upload(PingRequest)` from `get_upload_task` in a given time interval. Currently, the default limit is for a maximum of 15 upload tasks every 60 seconds and there are no exposed methods that allow changing this default (follow [Bug 1647630](https://bugzilla.mozilla.org/show_bug.cgi?id=1647630) for updates). If the caller has reached the maximum tasks for the current interval, they will get a `Task::Wait(u32)` regardless if there are other `Task::Upload(PingRequest)`s queued.
+
+### Ping payload
+
+The payload of a ping request is limited to a maximum of 1MB. If a `PingRequest` is created that exceeds this limits, it is discarded before being enqueued for upload.
+
+### Pending pings folder
+
+The pending pings folder is also limited to a maximum of 10MB. Everytime the upload manager is initialized, it calculates the size of this folder and, in case the limit has been reached, the oldest pings are discarded until the folder reaches an acceptable size again.
+
+> **Note** The deletion request pings are stored in a different folder from ordinary pings and are never discarded.
+
+### Backoff policy
+
+A caller may receive a `Task::Wait(u32)` response from `get_upload_task` either when glean-core is not finished scanning pendings pings directories or when the rate limit has been reached.
+
+The `Task::Wait(u32)` response carries a `u32` which signifies the amount of seconds the caller should wait before calling `get_upload_task` again. This amount starts at 10 seconds and increases exponentially by a power of two everytime we get a `Task::Wait(u32)` response in a row. If we get either `Task::Upload(PingRequest)` or `Task::Done` the backoff time is reset back to its minimum value.
+
+Another limitation imposed by the core, is that a caller is only allowed to get up to three `Task::Wait(u32)` responses in a row. When this limit is reached, the called gets a `Task::Done` and should stop making requests.
+
+> **Note** In Android, the `PingUploadWorker` is built on top of Android's [`WorkManager`](https://developer.android.com/jetpack/androidx/releases/work), which already has it's own backoff policy. This means that, in Android, we dismiss the wait time provided by the glean-core. Intentionally, the intervals calculated by the `WorkManager`s policy are the same as the ones calculated by the core, thus making the backoff delays standardized throughout all bindings.
 
 ## Available APIs
 
