@@ -12,4 +12,4 @@ pytest-localserver==0.5.0
 pytest-runner==5.2
 pytest==6.0.2
 twine==3.2.0
-wheel==0.34.2
+wheel==0.35.1
