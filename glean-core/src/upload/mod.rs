@@ -345,6 +345,10 @@ impl PingUploadManager {
             let mut pending_pings_directory_size: u64 = 0;
             let mut pending_pings_count = 0;
             let mut deleting = false;
+            // If our pending pings directory is too big,
+            // we should reduce it to reach 90% of the quota.
+            let safe_size_quota = self.policy.max_pending_pings_directory_size() as f64 * 0.9;
+            let mut pings_to_delete = Vec::new();
 
             let total = cached_pings.pending_pings.len() as u64;
             self.upload_metrics
@@ -378,11 +382,27 @@ impl PingUploadManager {
                     deleting = true;
                 }
 
+                if !deleting && pending_pings_directory_size as f64 > safe_size_quota {
+                    // We store the ids  of pings to delete when we reach the safe size quota,
+                    // because in case quota is hit, we retroactively delete these as well.
+                    pings_to_delete.push(document_id.clone());
+                }
+
                 // Once we reach the number of allowed pings we start deleting,
                 // no matter what size.
                 // We already log this before the loop.
                 if pending_pings_count > self.policy.max_pending_pings_count() {
                     deleting = true;
+                }
+
+                if deleting && pings_to_delete.len() > 0 {
+                    for document_id in pings_to_delete.drain(..) {
+                        if self.directory_manager.delete_file(&document_id) {
+                            self.upload_metrics
+                                .deleted_pings_after_quota_hit
+                                .add(glean, 1);
+                        }
+                    }
                 }
 
                 if deleting && self.directory_manager.delete_file(&document_id) {
@@ -722,6 +742,7 @@ mod test {
     use crate::{tests::new_glean, PENDING_PINGS_DIRECTORY};
 
     const PATH: &str = "/submit/app_id/ping_name/schema_version/doc_id";
+    const SIZE_OF_EMPTY_PING_FILE: f32 = 324.0; // This is based on manual testing.
 
     #[test]
     fn doesnt_error_when_there_are_no_pending_pings() {
@@ -1195,15 +1216,16 @@ mod test {
         // Create a new upload manager pointing to the same data_path as the glean instance.
         let mut upload_manager = PingUploadManager::no_policy(dir.path());
 
-        // Set the quota to just a little over the size on an empty ping file.
-        // This way we can check that one ping is kept and all others are deleted.
+        // This quota will keep only 1 empty ping file.
         //
-        // From manual testing I figured out an empty ping file is 324bytes,
-        // I am setting this a little over just so that minor changes to the ping structure
+        // When the quota is reached the directory size is shrunk to 90% of the quota.
+        // If we wish to keep 1 ping, the quota needs to be (1 / 0.9) * SIZE_OF_EMPTY_PING,
+        // we round that up to 1.2 so that small changes to the ping file structure
         // don't immediatelly break this.
+        let directory_quota = (SIZE_OF_EMPTY_PING_FILE * 1.2) as u64;
         upload_manager
             .policy
-            .set_max_pending_pings_directory_size(Some(500));
+            .set_max_pending_pings_directory_size(Some(directory_quota));
 
         // Get a task once
         // One ping should have been enqueued.
@@ -1342,11 +1364,16 @@ mod test {
         // Create a new upload manager pointing to the same data_path as the glean instance.
         let mut upload_manager = PingUploadManager::no_policy(dir.path());
 
-        // From manual testing we figured out an empty ping file is 324bytes,
-        // so this allows 3 pings.
+        // This quota will keep up to 3 empty ping files.
+        //
+        // When the quota is reached the directory size is shrunk to 90% of the quota.
+        // If we wish to keep 3 pings, the quota needs to be (3 / 0.9) * SIZE_OF_EMPTY_PING,
+        // we round that up to 3.4 so that small changes to the ping file structure
+        // don't immediatelly break this.
+        let directory_quota = (SIZE_OF_EMPTY_PING_FILE * 3.4) as u64;
         upload_manager
             .policy
-            .set_max_pending_pings_directory_size(Some(1000));
+            .set_max_pending_pings_directory_size(Some(directory_quota));
         upload_manager.policy.set_max_pending_pings_count(Some(5));
 
         // Get a task once
@@ -1416,11 +1443,16 @@ mod test {
         // Create a new upload manager pointing to the same data_path as the glean instance.
         let mut upload_manager = PingUploadManager::no_policy(dir.path());
 
-        // From manual testing we figured out an empty ping file is 324bytes,
-        // so this allows 3 pings.
+        // This quota will keep up to 3 empty ping files.
+        //
+        // When the quota is reached the directory size is shrunk to 90% of the quota.
+        // If we wish to keep 3 pings, the quota needs to be (3 / 0.9) * SIZE_OF_EMPTY_PING,
+        // we round that up to 3.4 so that small changes to the ping file structure
+        // don't immediatelly break this.
+        let directory_quota = (SIZE_OF_EMPTY_PING_FILE * 3.4) as u64;
         upload_manager
             .policy
-            .set_max_pending_pings_directory_size(Some(1000));
+            .set_max_pending_pings_directory_size(Some(directory_quota));
         upload_manager.policy.set_max_pending_pings_count(Some(2));
 
         // Get a task once
